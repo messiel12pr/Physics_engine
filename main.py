@@ -1,105 +1,48 @@
 # Example file showing a circle moving on screen
 import math
-import random
+import sys
 import pygame
+import utils
+from random import randrange
+from particle import Particle
+
+if len(sys.argv) > 1:
+    sim = sys.argv[1]
+
+else:
+    sim = 0
 
 # pygame setup
 pygame.init()
-screen = pygame.display.set_mode((1280//2, 720//2))
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 clock = pygame.time.Clock()
 running = True
-dt = 0
-gravity = pygame.Vector2(0, 0.1)
+G = utils.G
+gravity = utils.gravity_vector
 
 
-def vector_abs(v):
-    return pygame.Vector2(abs(v.x), abs(v.y))
+def two_body_simulation():
+    blue_particle = Particle(screen.get_width()/2, screen.get_height()/2, 0, 0, 1000000, math.log(1000000) * 8)
 
-def vector_pow(v, e):
-    return pygame.Vector2(v.x**e, v.y**e)
+    orbital_radius = blue_particle.r * 3
+    orbital_speed = math.sqrt(G * blue_particle.mass / blue_particle.r) * 0.07
+    red_particle = Particle(screen.get_width()/2 + orbital_radius, screen.get_height()/2, 0, orbital_speed, 10, math.log(10) * 8, "red")
 
-def vector_mult(v1, v2):
-    return pygame.Vector2(v1.x * v2.x, v1.y * v2.y)
-
-def vector_div(v1, v2):
-    return pygame.Vector2(v1.x / v2.x, v1.y / v2.y)
-
-
-class Particle:
-    def __init__(self, x, y, vx, vy, m, color = "blue"):
-        self.position = pygame.Vector2(x, y)
-        self.velocity = pygame.Vector2(vx, vy)
-        self.acceleration = pygame.Vector2(0, 0)
-        self.mass = m
-        self.r = math.sqrt(self.mass) * 20
-        self.color = color
+    orbital_radius += red_particle.r
+    orbital_speed = math.sqrt(G * red_particle.mass / red_particle.r) * 0.5
+    return [blue_particle, red_particle]
 
 
-    def update(self):
-        self.velocity += self.acceleration
-        self.position += self.velocity
-        self.acceleration *= 0
+def particle_simulation(num_particles, m):
+    m = .2
+    r = math.sqrt(m) * 20
+    blue_particles = [Particle(randrange(600, 1200), randrange(1, 300), -1, -3, m, r) for _ in range(num_particles//2)]
+    red_particles = [Particle(randrange(600, 1200), randrange(1, 300), -1, -3, m, r, "red") for _ in range(num_particles//2)]
+    return blue_particles + red_particles
 
 
-    def edges(self):
-        if self.position.x > screen.get_width() - self.r:
-            self.position.x = screen.get_width() - self.r
-            self.velocity.x *= -1
-
-        elif self.position.x < self.r:
-            self.position.x = self.r
-            self.velocity.x *= -1
-
-        if self.position.y > screen.get_height() - self.r:
-            self.position.y = screen.get_height() - self.r
-            self.velocity.y *= -1
-
-        elif self.position.y < self.r:
-            self.position.y = self.r
-            self.velocity.y *= -1
-
-
-    def draw(self):
-        pygame.draw.circle(screen, self.color, self.position, self.r)
-    
-    
-    def apply_force(self, force):
-        self.acceleration += force
-
-    
-    def collide(self, particle):
-        return self.position.distance_to(particle.position) < self.r + particle.r
-    
-    
-    def resolve_collision(self, particle):
-        distance = self.position.distance_to(particle.position)
-        normal = (particle.position - self.position).normalize()
-        overlap = (self.r + particle.r) - distance
-        if overlap > 0:
-            correction = normal * overlap * 0.5  # 0.5 for equal separation
-            self.position -= correction
-            particle.position += correction
-            distance = self.r + particle.r
-
-        # calculating self.velocity
-        velocity_diff = particle.velocity - self.velocity
-        position_diff = particle.position - self.position
-        numerator = (2*particle.mass) * velocity_diff.dot(position_diff) 
-        denominator = (self.mass + particle.mass) * distance * distance
-        self.velocity += position_diff * (numerator/denominator)
-
-        # calculating particle.velocity
-        velocity_diff *= -1
-        position_diff *= -1
-        numerator = (2*self.mass) * velocity_diff.dot(position_diff) 
-        particle.velocity += position_diff * (numerator/denominator)
-
-
-
-
-blue_particles = [Particle(random.randrange(1, 600), random.randrange(1, 300), -1, -3, .2) for _ in range(30)]
-red_particles = [Particle(random.randrange(1, 600), random.randrange(1, 300), -1, -3, .2, "red") for _ in range(30)]
-particles = blue_particles + red_particles
+particles = two_body_simulation() if sim else particle_simulation(100, 100)
+orbit = []
 
 while running:
     # poll for events
@@ -108,33 +51,41 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    # fill the screen with a color to wipe away anything from last frame
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                running = False
+
     screen.fill("white")
 
-    #p.apply_force(gravity)
     for i in range(len(particles)):
         for j in range(i + 1, len(particles)):
             p1 = particles[i] 
             p2 = particles[j]
-            if p2 != p1 and p1.collide(p2):
+            if p1.collide(p2):
                 p1.resolve_collision(p2)
+            if sim:
+                p1.apply_newtonian_gravity(p2)
 
-    #total_k_energy = 0
     for p in particles:
         p.update()
         p.edges()
         p.draw()
-        p.apply_force(gravity)
-        #total_k_energy += 0.5 * p.mass * p.velocity.magnitude()**2
+        if not sim:
+            p.apply_force(gravity)
 
-    #print(total_k_energy)
+    if sim:
+        pygame.draw.line(screen, "green", particles[0].position, particles[1].position, 2)
+        if len(orbit) >= 2:
+            pygame.draw.aalines(screen, "purple", False, orbit)
+        orbit.append((particles[1].position.x, particles[1].position.y))
+
 
     # flip() the display to put your work on screen
     pygame.display.flip()
-
     # limits FPS to 60
     # dt is delta time in seconds since last frame, used for framerate-
     # independent physics.
     dt = clock.tick(60) / 1000
+
 
 pygame.quit()
